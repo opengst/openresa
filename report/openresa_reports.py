@@ -31,14 +31,27 @@ class openresa_folio_report(report_sxw.rml_parse):
         else returns line group by product_id where amount > 0 for each occurrence-line of recurrence
     """
     def get_lines(self,order):
+        def sort_cmp_dates(x, y):
+            if x.checkin_date > y.checkin_date:
+                return 1
+            elif x.checkin_date < y.checkin_date:
+                return -1
+            return 0
+                
         ret= {}
-        #values of uom used for resa, if a prod has not uom_resa, we force it to display uom_day_resa
-        data_obj = self.pool.get('ir.model.data')
-        day_uom_id = data_obj.get_object_reference(self.cr, self.uid, 'openresa','openstc_pret_uom_day')[1]
-        day_uom = self.pool.get('product.uom').browse(self.cr, self.uid, day_uom_id, context=self.localcontext)
-        categ_uom_id = data_obj.get_object_reference(self.cr, self.uid, 'openresa','openstc_pret_uom_categ_resa')[1]
+        DEFAULT_ITEM_PER_COL = 6
+        cpt = 1
+        indice = 0
         #for each resa, merge values of all there lines
-        for line in order.room_lines:
+        lines = order.room_lines
+        nb_lines = len(lines) if lines else 0
+        #split records in 3 ~equals columns (to optimize the space to display)
+        item_min_per_col = max(nb_lines / 3, DEFAULT_ITEM_PER_COL)
+        nb_item_per_col = [item_min_per_col + (1 if nb_lines % 3 > 0 else 0), 
+                           item_min_per_col + (1 if nb_lines % 3 > 1 else 0), 
+                           item_min_per_col]
+        
+        for line in sorted(lines, cmp=sort_cmp_dates):
             
             #default value if prod not yet found (subtotal is computed at the end
             key = (line.product_id.id,line.product_uom_qty,line.product_uom.id,line.price_unit,line.discount)
@@ -48,11 +61,18 @@ class openresa_folio_report(report_sxw.rml_parse):
                                                  'unit_price':line.price_subtotal,
                                                  'discount':line.discount,
                                                  'description':line.product_id.description,
-                                                 'dates':'',
+                                                 'dates':['','',''],
                                                  'qty':0})
             #ret[key]['qty'] += int(line.product_uom_qty)
-            ret[key]['dates'] += '\n %s - %s' % (self.formatLang(line.checkin_date,date_time=True)[0:16],self.formatLang(line.checkout_date,date_time=True)[0:16])
+            date_str = '\n %s - %s' % (self.formatLang(line.checkin_date,date_time=True)[0:16],self.formatLang(line.checkout_date,date_time=True)[0:16])
+            ret[key]['dates'][indice] += date_str
             ret[key]['qty'] += 1
+            #if we filled the max_number of item on a column, we passe to the next colunm
+            if cpt >= nb_item_per_col[indice]:
+                cpt = 1
+                indice += 1
+            else:
+                cpt += 1
                 
         #format data to be easily used by report and to compute subtotal
         ret2 = []
